@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+scriptpath="$(readlink -f "$0")"
+scriptname="$(basename "${scriptpath}")"
+version="0.1.1"
+
+help="$(cat << EOF
+Usage: ${scriptname} [OPTIONS] [--] <IP/FQDN <IP/FQDN...>>
+  Initiates a connection to specified hosts, and performs basic configurations
+
+PARAMETERS:
+  -h, --help                 Prints this help text
+  -v, --version              Prints the version number
+  -k, --keyfile <FILE>       SSH keyfile
+  -r, --regen-key            Will regenerate the SSH key
+  -a, --aliases <ALIAS...>   Host aliases, must be same number as instances.
+                             If specified, '--' must be used to separate
+                             arguments from instance addresses. If this
+                             parameter is not provided, instance hostnames
+                             will be used. This may result in conflicts between
+                             these instances and machines on the local network.
+  -i, --internal-ips <IP...> Internal IPs, must be same number as instances.
+                             If specified, '--' must be used to separate
+                             arguments from instance addresses. If this
+                             parameter is not provided, this script will try
+                             to find IP addresses in 'ip addr' that are in the
+                             same private IP range. This may or may not be
+                             correct.
+  -u, --username <USERNAME>  Instance username
+  -p, --password <PASSWORD>  Instance password
+  
+
+EXAMPLES:
+  \$ ${scriptname} --version
+  >>> ${scriptname} v${version}
+  
+  \$ ${scriptname} -u cloud_newuser -p abc123?! 127.1.0.1 127.1.0.2 \
+                                                127.1.0.3 127.1.0.4
+  >>> Initializing 127.1.0.1
+  >>> Initializing 127.1.0.2
+  >>> Initializing 127.1.0.3
+  >>> Initializing 127.1.0.4
+  >>> Instances available as 'control', 'etcd', 'node1', 'node2'
+  >>> Done
+
+EOF
+)"
+
+default_config="$(cat << EOF
+username="cloud_user"
+keyfile="${HOME}/.ssh/id_acg"
+regen_key=1
+EOF
+)"
+
+default_conffiles=( "${HOME}/.config/acginit/acginit.conf" \
+                    "${HOME}/.acginit/acginit.conf" \
+                    "${HOME}/.acginit.conf \
+                    "${scriptpath}/acginit.conf )
+
+for conffile in "${default_conffiles[@]}"; do
+  conffile="$(readlink -f "${conffile}")"
+  confpath="$(dirname "${conffile}")"
+  [[ -f "${conffile}" ]] && break
+  if [[ -d "${confpath}" ]]; then
+    if [[ "${confpath}" != "$(readlink -f "${HOME}")" ]]; then
+      echo -e "${default_config}" > "${conffile}" && break
+    fi
+  fi
+done
+. "${conffile}"
+
+opt_help=${help:-0}
+opt_version=${version:-0}
+opt_regen_key=${regen_key:-1}
+var_username="${username}"
+var_password="${password}"
+var_keyfile="${keyfile}"
+var_aliases=()
+var_internal_ips=()
+var_acg_hosts=()
+
+active_opt=
+
+(( $# == 0 )) && opt_help=1
+for arg in "$@"; do
+  [[ "${active_opt}" == "acg-hosts" ]] && var_acg_hosts+=( "${arg}" ) && continue
+  [[ "${active_opt}" == "username" ]]  && var_username="${arg}"       && active_opt= && continue
+  [[ "${active_opt}" == "password" ]]  && var_password="${arg}"       && active_opt= && continue
+  [[ "${active_opt}" == "keyfile" ]]   && var_keyfile="${arg}"        && active_opt= && continue
+  if [[ "${arg}" == "--" ]]; then
+    active_opt="acg-hosts" && continue
+  elif [[ "${arg:0:2}" == "--" ]]; then
+    [[ "${arg:2}" == "help" ]]         && active_opt=           && opt_help=1      && continue
+    [[ "${arg:2}" == "version" ]]      && active_opt=           && opt_version=1   && continue
+    [[ "${arg:2}" == "regen-key" ]]    && active_opt=           && opt_regen_key=1 && continue
+    [[ "${arg:2}" == "username" ]]     && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "password" ]]     && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "keyfile" ]]      && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "aliases" ]]      && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "internal-ips" ]] && active_opt="${arg:2}" && continue
+    echo "Unrecognized parameter '${arg}'" >&2 && exit 9
+  elif [[ "${arg:0:1}" == "-" ]]; then
+    for ((i=1; i<${#arg}; i++)); do
+      [[ "${arg:$i:1}" == "?" ]] && active_opt=   && opt_help=1      && continue
+      [[ "${arg:$i:1}" == "h" ]] && active_opt=   && opt_help=1      && continue
+      [[ "${arg:$i:1}" == "v" ]] && active_opt=   && opt_version=1   && continue
+      [[ "${arg:$i:1}" == "r" ]] && active_opt=   && opt_regen_key=1 && continue
+      [[ "${arg:$i:1}" == "u" ]] && active_opt="username"     && continue
+      [[ "${arg:$i:1}" == "p" ]] && active_opt="password"     && continue
+      [[ "${arg:$i:1}" == "k" ]] && active_opt="keyfile"      && continue
+      [[ "${arg:$i:1}" == "a" ]] && active_opt="aliases"      && continue
+      [[ "${arg:$i:1}" == "i" ]] && active_opt="internal-ips" && continue
+      echo "Unrecognized parameter '-${arg:$i:1}'" >&2 && exit 9
+    done
+  fi
+  [[ "${active_opt}" == "aliases" ]]      && var_aliases+=( "${arg}" )      && continue
+  [[ "${active_opt}" == "internal-ips" ]] && var_internal_ips+=( "${arg}" ) && continue
+  var_acg_hosts+=( "${arg}" )
+  active_opt="acg-hosts"
+done
+
+(( opt_version )) && echo "${scriptname} v${version}" >&2
+(( opt_help )) && echo -e "${help}" >&2
+
+if (( ${#var_aliases} )) && (( ${#var_aliases} != ${#var_acg_hosts} )); then
+  echo "The number of acg-hosts and aliases do not match." >&2
+  exit 1
+elif (( ${#var_internal_ips} )) && (( ${#var_internal_ips} != ${#var_acg_hosts} )); then
+  echo "The number of acg-hosts and internal-ips do not match." >&2
+  exit 1
+fi
+if [[ -z "${var_keyfile}" ]]; then
+  echo "There is no keyfile specified." >&2
+  exit 1
+fi
+if [[ -z "${var_username}" ]]; then
+  echo "There is no username specified." >&2
+  exit 1
+fi
+if [[ -z "${var_password}" ]]; then
+  read -sn 64 -p "Please provide the acg instance password: " var_password; echo
+fi
+
+((opt_regen_key)) && rm -f "${var_keyfile}"
+if [[ ! -f "${var_keyfile}" ]]; then
+  ssh-keygen -t ed25519 -N "" -f "${var_keyfile}"
+fi
+
+for ((i=0; i<${#var_acg_hosts[@]}; i++)); do
+  echo "${var_password}" | ssh-copy-id -i "${var_keyfile}" "${var_acg_hosts[$i]}"
+done
