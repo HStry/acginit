@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 scriptpath="$(readlink -f "$0")"
 scriptname="$(basename "${scriptpath}")"
-version="0.1.2"
+scriptversion="0.1.2"
 
 help="$(cat << EOF
 Usage: ${scriptname} [OPTIONS] [--] <IP/FQDN <IP/FQDN...>>
@@ -11,6 +11,8 @@ PARAMETERS:
   -h, --help                 Prints this help text
   -v, --version              Prints the version number
   -K, --regen-key            Will regenerate the SSH key
+  -f, --force                Suppresses confirmation dialogs.
+  
   -k, --keyfile <FILE>       SSH keyfile
   -c, --config-file <FILE>   config file
   -a, --aliases <ALIAS...>   Host aliases, must be same number as instances.
@@ -32,7 +34,7 @@ PARAMETERS:
 
 EXAMPLES:
   \$ ${scriptname} --version
-  ${scriptname} v${version}
+  ${scriptname} v${scriptversion}
   
   \$ ${scriptname} -u cloud_newuser -p abc123?! 127.1.0.1 127.1.0.2 \
                                                 127.1.0.3 127.1.0.4
@@ -45,6 +47,14 @@ EXAMPLES:
 
 EOF
 )"
+
+confirm_keyregen() {
+  msg="Keyfile '\${1}' already exists. Are you"
+  msg+=" sure you want to regenerate it? [yN] "
+  echo "${msg}"
+}
+confirm_keyregen="Keyfile '\${var_keyfile}' already exists. Are you"
+confirm_keyregen+=" sure you want to regenerate it? [yN] "
 
 default_config="$(cat << EOF
 username="cloud_user"
@@ -62,6 +72,7 @@ noerr=0
 opt_help=0
 opt_version=0
 opt_regen_key=1
+opt_force=0
 var_username=
 var_password=
 var_keyfile=
@@ -85,6 +96,7 @@ for arg in "$@"; do
     [[ "${arg:2}" == "help" ]]         && active_opt=           && opt_help=1      && continue
     [[ "${arg:2}" == "version" ]]      && active_opt=           && opt_version=1   && continue
     [[ "${arg:2}" == "regen-key" ]]    && active_opt=           && opt_regen_key=1 && continue
+    [[ "${arg:2}" == "force" ]]        && active_opt=           && opt_force=1     && continue
     [[ "${arg:2}" == "username" ]]     && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "password" ]]     && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "keyfile" ]]      && active_opt="${arg:2}" && continue
@@ -98,6 +110,7 @@ for arg in "$@"; do
       [[ "${arg:$i:1}" == "h" ]] && active_opt=   && opt_help=1      && continue
       [[ "${arg:$i:1}" == "v" ]] && active_opt=   && opt_version=1   && continue
       [[ "${arg:$i:1}" == "K" ]] && active_opt=   && opt_regen_key=1 && continue
+      [[ "${arg:$i:1}" == "f" ]] && active_opt=   && opt_force=1     && continue
       [[ "${arg:$i:1}" == "u" ]] && active_opt="username"     && continue
       [[ "${arg:$i:1}" == "p" ]] && active_opt="password"     && continue
       [[ "${arg:$i:1}" == "k" ]] && active_opt="keyfile"      && continue
@@ -129,6 +142,8 @@ else
   var_config_file="${config_file}"
 fi
 . "${var_config_file}"
+
+
 var_username="${var_username:-${username}}"
 var_password="${var_password:-${password}}"
 var_keyfile="$(readlink -f "${var_keyfile:-${keyfile}}")"
@@ -149,7 +164,7 @@ if (( "${#var_acg_hosts[@]}" == 0 )); then
   done
 fi
 
-(( opt_version )) && noerr=1 && echo "${scriptname} v${version}"
+(( opt_version )) && noerr=1 && echo "${scriptname} v${scriptversion}"
 (( opt_help ))    && noerr=1 && echo -e "${help}"
 
 nhosts=${#var_acg_hosts[@]}
@@ -178,7 +193,14 @@ if [[ -z "${var_password}" ]]; then
   read -sn 64 -p "Please provide the acg instance password: " var_password; echo
 fi
 
-((opt_regen_key)) && rm -f "${var_keyfile}"
+if (( opt_regen_key )) && [[ -f "${opt_keyfile}" ]]; then
+  if (( opt_force == 0 )); then
+    read -n1 -p "$(confirm_keyregen "${var_keyfile}')" cont; echo
+    [[ "${cont,,}" != "y" ]] && echo "Exiting.." >&2 && exit 1
+  fi
+  rm -f "${var_keyfile}"
+fi
+
 if [[ ! -f "${var_keyfile}" ]]; then
   ssh-keygen -t ed25519 -N "" -f "${var_keyfile}"
 fi
