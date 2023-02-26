@@ -30,6 +30,7 @@ PARAMETERS:
                              correct.
   -u, --username <USERNAME>  Instance username
   -p, --password <PASSWORD>  Instance password
+      --ansiblepb <EXEC>     Location of 'ansible-playbook' executable.
   
 
 EXAMPLES:
@@ -77,6 +78,7 @@ var_username=
 var_password=
 var_keyfile=
 var_config_file=
+var_ansiblepb=
 var_aliases=()
 var_internal_ips=()
 var_acg_hosts=()
@@ -88,6 +90,7 @@ for arg in "$@"; do
   [[ "${active_opt}" == "acg-hosts" ]]   && var_acg_hosts+=( "${arg}" ) && continue
   [[ "${active_opt}" == "username" ]]    && var_username="${arg}"       && active_opt= && continue
   [[ "${active_opt}" == "password" ]]    && var_password="${arg}"       && active_opt= && continue
+  [[ "${active_opt}" == "ansiblepb" ]]   && var_ansiblepb="${arg}"      && active_opt= && continue
   [[ "${active_opt}" == "keyfile" ]]     && var_keyfile="${arg}"        && active_opt= && continue
   [[ "${active_opt}" == "config-file" ]] && var_config_file="${arg}"    && active_opt= && continue
   if [[ "${arg}" == "--" ]]; then
@@ -99,6 +102,7 @@ for arg in "$@"; do
     [[ "${arg:2}" == "force" ]]        && active_opt=           && opt_force=1     && continue
     [[ "${arg:2}" == "username" ]]     && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "password" ]]     && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "ansiblepb" ]]    && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "keyfile" ]]      && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "config-file" ]]  && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "aliases" ]]      && active_opt="${arg:2}" && continue
@@ -143,7 +147,7 @@ else
 fi
 . "${var_config_file}"
 
-
+var_ansiblepb="${var_ansiblepb:-${ansiblepb:-$(which ansible-playbook)}}"
 var_username="${var_username:-${username}}"
 var_password="${var_password:-${password}}"
 var_keyfile="$(readlink -f "${var_keyfile:-${keyfile}}")"
@@ -167,6 +171,12 @@ fi
 (( opt_version )) && noerr=1 && echo "${scriptname} v${scriptversion}"
 (( opt_help ))    && noerr=1 && echo -e "${help}"
 
+if [[ -z "${var_ansiblepb}" ]]; then
+  (( noerr )) && exit
+  echo "ERROR: Cannot find the ansible-playbook command." >&2
+  echo -e "${help}" >&2
+  exit 1
+fi
 nhosts=${#var_acg_hosts[@]}
 if (( nhosts == 0 )); then
   (( noerr )) && exit
