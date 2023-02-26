@@ -31,6 +31,7 @@ PARAMETERS:
   -u, --username <USERNAME>  Instance username
   -p, --password <PASSWORD>  Instance password
       --ansiblepb <EXEC>     Location of 'ansible-playbook' executable.
+      --stagingdir <PATH>    Path to directory to contain staging files.
   
 
 EXAMPLES:
@@ -79,6 +80,7 @@ var_password=
 var_keyfile=
 var_config_file=
 var_ansiblepb=
+var_stagingdir=
 var_aliases=()
 var_internal_ips=()
 var_acg_hosts=()
@@ -93,6 +95,7 @@ for arg in "$@"; do
   [[ "${active_opt}" == "ansiblepb" ]]   && var_ansiblepb="${arg}"      && active_opt= && continue
   [[ "${active_opt}" == "keyfile" ]]     && var_keyfile="${arg}"        && active_opt= && continue
   [[ "${active_opt}" == "config-file" ]] && var_config_file="${arg}"    && active_opt= && continue
+  [[ "${active_opt}" == "stagingdir" ]]  && var_stagingdir="${arg}"     && active_opt= && continue
   if [[ "${arg}" == "--" ]]; then
     active_opt="acg-hosts" && continue
   elif [[ "${arg:0:2}" == "--" ]]; then
@@ -105,6 +108,7 @@ for arg in "$@"; do
     [[ "${arg:2}" == "ansiblepb" ]]    && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "keyfile" ]]      && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "config-file" ]]  && active_opt="${arg:2}" && continue
+    [[ "${arg:2}" == "stagingdir" ]]   && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "aliases" ]]      && active_opt="${arg:2}" && continue
     [[ "${arg:2}" == "internal-ips" ]] && active_opt="${arg:2}" && continue
     echo "Unrecognized parameter '${arg}'" >&2 && exit 9
@@ -147,7 +151,15 @@ else
 fi
 . "${var_config_file}"
 
+################################################################################
+################################################################################
+#                                                                              #
+# Set variables according to cmdline/config-file/default preference            #
+#                                                                              #
+################################################################################
+
 var_ansiblepb="${var_ansiblepb:-${ansiblepb:-$(which ansible-playbook)}}"
+var_stagingdir="${var_stagingdir:-${stagingdir:-"${HOME}/acginit/staging_$(date +%Y%m%d-%H%M)"}}"
 var_username="${var_username:-${username}}"
 var_password="${var_password:-${password}}"
 var_keyfile="$(readlink -f "${var_keyfile:-${keyfile}}")"
@@ -173,7 +185,7 @@ fi
 
 if [[ -z "${var_ansiblepb}" ]]; then
   (( noerr )) && exit
-  echo "ERROR: Cannot find the ansible-playbook command." >&2
+  echo "ERROR: Cannot find the 'ansible-playbook' command." >&2
   echo -e "${help}" >&2
   exit 1
 fi
@@ -202,6 +214,8 @@ fi
 if [[ -z "${var_password}" ]]; then
   read -sn 64 -p "Please provide the acg instance password: " var_password; echo
 fi
+if [[ -z "${var_stagingdir}" ]]; then
+fi
 
 if (( opt_regen_key )) && [[ -f "${opt_keyfile}" ]]; then
   if (( opt_force == 0 )); then
@@ -214,6 +228,10 @@ fi
 if [[ ! -f "${var_keyfile}" ]]; then
   ssh-keygen -t ed25519 -N "" -f "${var_keyfile}"
 fi
+
+
+
+cat << EOF > inventory.yml
 
 for ((i=0; i<${#var_acg_hosts[@]}; i++)); do
   echo "${var_password}" | ssh-copy-id -i "${var_keyfile}" "${var_acg_hosts[$i]}"
